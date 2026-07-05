@@ -1,5 +1,25 @@
 # Submission Doc
 
+## AI Usage
+
+### Reproducing before fixing: 
+
+For each bug, I asked Claude to help design a reproduction step before touching code — e.g., specific datetime values to trigger the Sunday-only streak bug, and flask shell tests around the 24-hour cutoff for the "Friends Listening Now" issue.
+
+### Tracing root causes: 
+
+For the streak bug, I asked Claude to explain the purpose of `today.weekday() != 6` and why it was excluding Sundays then later realized that this was the whole bug - it was unnecessary and should not have excluded it. For the playlist bug, the existing failing test's diff made the off-by-one slice obvious with little extra tracing needed.
+
+### Where it might've went wrong:
+
+For the search duplication issue, I actually couldn't figure out how where the bug was and Claude was attempting to help by suggesting multiple directions but wasnt able to locate it either. Claude reasoned that the `outerjoin` on `song_tags` without `.distinct()` should produce duplicate rows for songs with multiple tags. I tested it directly and it didn't reproduce. After multiple attempts, I couldn't reproduce this one after a genuine attempt, so I moved to a different bug (last song in playlist) instead of forcing it.
+
+
+### Verification I did myself: 
+For every bug, I ran the actual test suite or manual reproduction before and after each fix rather than trusting predictions - this caught the search bug false positive and confirmed the notification fix by toggling it on/off and checking test results directly. For the playlist bug, the existing test failures already pointed at the last song being dropped; I found the songs[:-1] slice myself and Claude double check my write up and format for the root cause entry.
+
+
+
 ## Codebase map
 
 `app.py` - a standard Flask setup; there's a `create_app()` factory that sets up the database and registers four blueprints: songs, playlists, users, and feed. Each one gets its own URL prefix (`/songs`, `/playlists`, etc.). It calls `db.create_all()` on startup and defaults to a local SQLite file so there's no migration system to worry about.
@@ -85,3 +105,4 @@ Compared `rate_song()` to `add_to_playlist()` in `notification_service.py`, sinc
 #### 5. My fix and side-effect check:
 
 Added a `create_notification()` call after the commit in `rate_song()`, using `notification_type="song_rated`", and skipping it when the rater is the song's own sharer (mirroring `add_to_playlist()`'s self-notification skip). Re-ran tests/`test_notifications.py`: all three tests pass, including confirmation that self-ratings don't trigger a notification and that playlist-add notifications still work unchanged
+
