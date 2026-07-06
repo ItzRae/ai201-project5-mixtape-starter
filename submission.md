@@ -4,7 +4,7 @@
 
 ### Reproducing before fixing: 
 
-For each bug, I asked Claude to help design a reproduction step before touching code — e.g., specific datetime values to trigger the Sunday-only streak bug, and flask shell tests around the 24-hour cutoff for the "Friends Listening Now" issue.
+For some bugs, I asked Claude to help design a reproduction step before touching code — e.g., specific datetime values to trigger the Sunday-only streak bug, and flask shell tests around the 24-hour cutoff for the "Friends Listening Now" issue.
 
 ### Tracing root causes: 
 
@@ -12,7 +12,7 @@ For the streak bug, I asked Claude to explain the purpose of `today.weekday() !=
 
 ### Where it might've went wrong:
 
-For the search duplication issue, I actually couldn't figure out how where the bug was and Claude was attempting to help by suggesting multiple directions but wasnt able to locate it either. Claude reasoned that the `outerjoin` on `song_tags` without `.distinct()` should produce duplicate rows for songs with multiple tags. I tested it directly and it didn't reproduce. After multiple attempts, I couldn't reproduce this one after a genuine attempt, so I moved to a different bug (last song in playlist) instead of forcing it.
+For the search duplication issue, I actually couldn't figure out how where the bug was - even after running pytests for `test_search.py` and `search_songs()` via `flask shell` several times, all tests passed and the duplicate was not appearing (hadn't changed anything in the service file) and Claude was attempting to help by suggesting multiple directions but wasnt able to locate it either. Claude reasoned that the `outerjoin` on `song_tags` without `.distinct()` should produce duplicate rows for songs with multiple tags. I tested it directly and it didn't reproduce. After multiple attempts, I couldn't reproduce this one after a genuine attempt, so I moved to a different bug (last song in playlist) instead of forcing it.
 
 
 ### Verification I did myself: 
@@ -52,11 +52,11 @@ So the notification goes to the person who first shared the song, and it skips t
 
 #### 2. How I reproduced bug: 
 
-Ran the existing test suite (`test_streaks.py`) before making any changes. `test_streak_increments_on_sunday` failed with assert 1 == 2: after calling `update_listening_streak` with a Saturday datetime (streak correctly set to 1), calling it again with the following Sunday's datetime left the streak at 1 instead of incrementing to 2. The other four tests in the file passed, confirming the bug was isolated to the Saturday→Sunday transition specifically - not a general failure of the increment or reset logic.
+Ran the existing test suite (`test_streaks.py`) before making any changes. `test_streak_increments_on_sunday` failed with assert 1 == 2: after calling `update_listening_streak` with a Saturday datetime (streak correctly set to 1), calling it again with the following Sunday's datetime left the streak at 1 instead of incrementing to 2. The other four tests in the file passed, confirming the bug was isolated to the Saturday->Sunday transition specifically and not a general failure of the increment or reset logic.
 
 #### 3. How I found the root cause : 
 
-I read `update_listening_streak` line by line, since it was the only function under test. The reset/increment branching is a single `if/elif/else` block, so I traced the exact condition being evaluated on the failing call: `days_since_last == 1` and `today.weekday() != 6`. With days_since_last correctly equal to 1 (Sat→Sun is one day apart), the only way to fall through to the else reset branch was the second half of that condition. Checking `datetime.weekday()`'s documented return values confirmed Sunday maps to 6, so `today.weekday() != 6` evaluates to `False `specifically and only on a Sunday so I was confident this was the exact cause
+I read `update_listening_streak` line by line, since it was the only function under test. The reset/increment branching is a single `if/elif/else` block, so I traced the exact condition being evaluated on the failing call: `days_since_last == 1` and `today.weekday() != 6`. With days_since_last correctly equal to 1 (Sat->Sun is one day apart), the only way to fall through to the else reset branch was the second half of that condition. Checking `datetime.weekday()`'s documented return values confirmed Sunday maps to 6, so `today.weekday() != 6` evaluates to `False `specifically and only on a Sunday so I was confident this was the exact cause
 
 #### 4. the root cause:
 
@@ -64,7 +64,7 @@ The `elif` branch that increments the streak required `days_since_last == 1` and
 
 #### 5. my fix and side-effect check :
 
-Removed the `and today.weekday() != 6` clause so it just left `elif days_since_last == 1:` to increment the streak whenever exactly one day has passed. Re-ran the full `test_streaks.py` suite afterward: all five tests passed, including `test_streak_increments_on_consecutive_day` (Mon→Tue, confirms non-Sunday increments still work), `test_streak_does_not_double_count_same_day`, and `test_streak_resets_after_skipped_day` (confirms the reset branch for skipped days is untouched). This confirmed the fix corrected the Sunday case without affecting the same-day, consecutive-day, or gap-reset logic that shares the same function
+Removed the `and today.weekday() != 6` clause so it just left `elif days_since_last == 1:` to increment the streak whenever exactly one day has passed. Re-ran the full `test_streaks.py` suite afterward: all five tests passed (Mon→Tue, confirms non-Sunday increments still work, and confirms the reset branch for skipped days is untouched). This confirmed the fix corrected the Sunday case without affecting the same-day, consecutive-day, or gap-reset logic that shares the same function
 
 -----
 
@@ -106,3 +106,8 @@ Compared `rate_song()` to `add_to_playlist()` in `notification_service.py`, sinc
 
 Added a `create_notification()` call after the commit in `rate_song()`, using `notification_type="song_rated`", and skipping it when the rater is the song's own sharer (mirroring `add_to_playlist()`'s self-notification skip). Re-ran tests/`test_notifications.py`: all three tests pass, including confirmation that self-ratings don't trigger a notification and that playlist-add notifications still work unchanged
 
+---
+
+### Stretch Features: Regression Test
+
+**Regression test:** `tests/test_notifications.py::test_rate_song_notifies_sharer` verifies that rating a friend's shared song creates a song_rated notification for the sharer. This test fails against the original code (confirmed by commenting out the fix and rerunning), since `rate_song()` never called `create_notification()`. No test file existed for notifications prior to this fix, so this closes that coverage gap going forward.
